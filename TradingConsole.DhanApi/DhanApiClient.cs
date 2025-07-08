@@ -31,29 +31,29 @@ namespace TradingConsole.DhanApi
             public string? Expiry { get; set; }
         }
 
-        // --- CORRECTED: Models for the correct /v2/charts/intraday endpoint ---
+        // --- CORRECTED: Model updated to match the successful test request ---
         private class IntradayDataRequest
         {
-            [JsonProperty("symbol")]
-            public string Symbol { get; set; } = string.Empty;
+            [JsonProperty("securityId")]
+            public string SecurityId { get; set; } = string.Empty;
 
-            [JsonProperty("exchange")]
-            public string Exchange { get; set; } = string.Empty;
+            [JsonProperty("exchangeSegment")]
+            public string ExchangeSegment { get; set; } = string.Empty;
 
-            [JsonProperty("instrumentType")]
-            public string InstrumentType { get; set; } = string.Empty;
-
-            [JsonProperty("expiryCode")]
-            public string ExpiryCode { get; set; } = "0"; // Default for non-derivatives
-
-            [JsonProperty("from_date")]
-            public string FromDate { get; set; } = string.Empty;
-
-            [JsonProperty("to_date")]
-            public string ToDate { get; set; } = string.Empty;
+            [JsonProperty("instrument")]
+            public string Instrument { get; set; } = string.Empty;
 
             [JsonProperty("interval")]
-            public string Interval { get; set; } = "1"; // 1-minute interval
+            public string Interval { get; set; } = "1";
+
+            [JsonProperty("oi")]
+            public bool Oi { get; set; } = true; // Added this field
+
+            [JsonProperty("fromDate")]
+            public string FromDate { get; set; } = string.Empty;
+
+            [JsonProperty("toDate")]
+            public string ToDate { get; set; } = string.Empty;
         }
 
         public class HistoricalDataResponse
@@ -65,6 +65,7 @@ namespace TradingConsole.DhanApi
             public HistoricalDataPoints? Data { get; set; }
         }
 
+        // --- CORRECTED: Model updated to match the successful test response ---
         public class HistoricalDataPoints
         {
             [JsonProperty("open")]
@@ -82,11 +83,11 @@ namespace TradingConsole.DhanApi
             [JsonProperty("volume")]
             public List<long> Volume { get; set; } = new List<long>();
 
-            // Note: The API does NOT return OI for intraday charts.
-            // We will handle this in the AnalysisService.
-
-            [JsonProperty("start_Time")]
+            [JsonProperty("timestamp")] // Corrected from start_Time
             public List<long> StartTime { get; set; } = new List<long>();
+
+            [JsonProperty("open_interest")] // Added this field
+            public List<long> OpenInterest { get; set; } = new List<long>();
         }
 
 
@@ -180,43 +181,33 @@ namespace TradingConsole.DhanApi
             }
         }
 
-        // --- CORRECTED: Method to get historical intraday data using the correct endpoint and payload ---
+        // --- CORRECTED: Method now builds the request payload exactly as per the official documentation ---
         public async Task<HistoricalDataResponse?> GetIntradayHistoricalDataAsync(ScripInfo scripInfo, string interval = "1")
         {
-            var request = new IntradayDataRequest
+            var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            var todayInIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istZone).Date;
+
+            var fromDate = todayInIst.ToString("yyyy-MM-dd") + " 09:15:00";
+            var toDate = todayInIst.ToString("yyyy-MM-dd") + " 15:30:00";
+
+            var requestBody = new IntradayDataRequest
             {
-                Symbol = scripInfo.TradingSymbol,
-                Exchange = GetApiExchangeSegment(scripInfo.Segment),
-                InstrumentType = GetApiInstrumentType(scripInfo.InstrumentType),
-                ExpiryCode = scripInfo.ExpiryDate?.ToString("yyMMdd") ?? "0",
-                FromDate = DateTime.Now.ToString("yyyy-MM-dd"),
-                ToDate = DateTime.Now.ToString("yyyy-MM-dd"),
-                Interval = interval
+                SecurityId = scripInfo.SecurityId,
+                ExchangeSegment = scripInfo.Segment,      // CORRECTED: Use direct value
+                Instrument = scripInfo.InstrumentType,    // CORRECTED: Use direct value
+                Interval = interval,
+                FromDate = fromDate,
+                ToDate = toDate
             };
 
-            string jsonPayload = JsonConvert.SerializeObject(request);
+            string jsonPayload = JsonConvert.SerializeObject(requestBody);
+
+            // --- DEBUG CODE (Kept for confirmation) ---
+            Debug.WriteLine($"[DhanApiClient] Sending Intraday Request: {jsonPayload}");
+
             var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
             return await ExecuteGeneralApiCall<HistoricalDataResponse>(() => _httpClient.PostAsync("/v2/charts/intraday", content), "GetIntradayHistoricalData");
         }
-
-        private string GetApiExchangeSegment(string segment) => segment switch
-        {
-            "NSE_EQ" => "NSE",
-            "NSE_FNO" => "NFO",
-            "BSE_EQ" => "BSE",
-            "BSE_FNO" => "BFO",
-            "IDX_I" => "IDX",
-            _ => "NSE"
-        };
-
-        private string GetApiInstrumentType(string instrumentType) => instrumentType switch
-        {
-            "FUTIDX" => "FUT",
-            "FUTSTK" => "FUT",
-            "OPTIDX" => "OPT",
-            "OPTSTK" => "OPT",
-            _ => instrumentType
-        };
 
 
         public async Task<List<PositionResponse>?> GetPositionsAsync()
